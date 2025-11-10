@@ -15,6 +15,7 @@ export type Attachment = {
     size: number;
     url: string;
     storagePath: string;
+    summary?: string;
 };
 
 export type Message = {

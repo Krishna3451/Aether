@@ -4,11 +4,23 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib";
 import { Attachment, generateAIResponse, generateTitle, Message } from "@/actions/chat";
 import { ATTACHMENT_BUCKET } from "@/constants/storage";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createRequire } from "module";
 
 export const runtime = "nodejs";
 
 const MAX_ATTACHMENT_CONTEXT_CHARS = 4000;
+const IMAGE_DESCRIPTION_MODEL_CANDIDATES = [
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash",
+];
+const IMAGE_DESCRIPTION_PROMPT = [
+    "You are assisting a financial advisor chatbot. Provide a concise yet informative summary of the attached image that could help with financial planning conversations.",
+    "Mention any text that appears in the image and transcribe it accurately.",
+    "Identify charts, tables, or numerical figures and describe their meaning if possible.",
+    "Keep the response under 12 sentences and avoid speculation if information is unclear.",
+].join(" ");
 
 type PdfParseFn = (data: Buffer) => Promise<{ text?: string }>;
 type PdfParseModule = PdfParseFn | { default: PdfParseFn };
@@ -16,6 +28,9 @@ type PdfParseModule = PdfParseFn | { default: PdfParseFn };
 const require = createRequire(import.meta.url);
 
 let cachedPdfParse: PdfParseFn | null = null;
+let cachedVisionClient: GoogleGenerativeAI | null = null;
+const cachedImageModels = new Map<string, ReturnType<GoogleGenerativeAI["getGenerativeModel"]>>();
+let loggedMissingVisionKey = false;
 
 const parsePdf = async (buffer: Buffer) => {
     if (!cachedPdfParse) {
@@ -31,6 +46,71 @@ const parsePdf = async (buffer: Buffer) => {
     }
 
     return cachedPdfParse!(buffer);
+};
+
+const describeImage = async (buffer: Buffer, mimeType: string): Promise<string | undefined> => {
+    const apiKey = process.env.GOOGLE_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+
+    if (!apiKey) {
+        if (!loggedMissingVisionKey) {
+            console.warn("Image description skipped: GOOGLE_API_KEY (or NEXT_PUBLIC_GOOGLE_API_KEY) is not configured.");
+            loggedMissingVisionKey = true;
+        }
+        return undefined;
+    }
+
+    try {
+        if (!cachedVisionClient) {
+            cachedVisionClient = new GoogleGenerativeAI(apiKey);
+        }
+
+        const base64Data = buffer.toString("base64");
+        let lastError: unknown;
+
+        for (const modelName of IMAGE_DESCRIPTION_MODEL_CANDIDATES) {
+            try {
+                const model =
+                    cachedImageModels.get(modelName) ??
+                    cachedVisionClient.getGenerativeModel({ model: modelName });
+
+                cachedImageModels.set(modelName, model);
+
+                const response = await model.generateContent([
+                    { inlineData: { data: base64Data, mimeType } },
+                    { text: IMAGE_DESCRIPTION_PROMPT },
+                ]);
+
+                const text = response.response.text();
+
+                if (!text?.trim()) {
+                    return undefined;
+                }
+
+                return cleanAndTruncateText(text, MAX_ATTACHMENT_CONTEXT_CHARS);
+            } catch (error) {
+                const status = (error as { status?: number }).status;
+                if (status === 404) {
+                    cachedImageModels.delete(modelName);
+                    lastError = error;
+                    continue;
+                }
+
+                throw error;
+            }
+        }
+
+        if (lastError) {
+            console.warn(
+                "Image description skipped: no supported Gemini multimodal models were available.",
+                lastError,
+            );
+        }
+
+        return undefined;
+    } catch (error) {
+        console.error("Failed to generate image description:", error);
+        return undefined;
+    }
 };
 
 type UploadedAttachment = {
@@ -72,9 +152,13 @@ const uploadAttachments = async (
             const buffer = Buffer.from(await file.arrayBuffer());
 
             let extractedText: string | undefined;
+            let attachmentSummary: string | undefined;
             const isPdf =
                 file.type === "application/pdf" ||
                 extension === "pdf";
+            const isImage =
+                file.type?.startsWith("image/") ||
+                ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "svg"].includes(extension);
 
             if (isPdf) {
                 try {
@@ -84,6 +168,11 @@ const uploadAttachments = async (
                     }
                 } catch (error) {
                     console.error(`Failed to parse PDF ${file.name}:`, error);
+                }
+            } else if (isImage) {
+                attachmentSummary = await describeImage(buffer, file.type || `image/${extension}`);
+                if (attachmentSummary) {
+                    extractedText = attachmentSummary;
                 }
             }
 
@@ -122,6 +211,7 @@ const uploadAttachments = async (
                     size: file.size,
                     storagePath: objectPath,
                     url,
+                    summary: attachmentSummary,
                 },
                 extractedText,
             };

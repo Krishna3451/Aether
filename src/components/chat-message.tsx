@@ -60,19 +60,25 @@ const ChatMessage = ({ index, message, messages, isLoading }: Props) => {
                     {!!message.attachments?.length && (
                         <div className="mt-3 space-y-2">
                             {message.attachments.map((attachment) => (
-                                <a
-                                    key={attachment.id}
-                                    href={attachment.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-2 text-sm text-blue-500 underline"
-                                >
-                                    <Icons.file className="size-4" />
-                                    <span>{attachment.name}</span>
-                                    <span className="text-xs text-muted-foreground">
-                                        ({formatFileSize(attachment.size)})
-                                    </span>
-                                </a>
+                                <div key={attachment.id} className="flex flex-col gap-1">
+                                    <a
+                                        href={attachment.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-2 text-sm text-blue-500 underline"
+                                    >
+                                        <Icons.file className="size-4" />
+                                        <span>{attachment.name}</span>
+                                        <span className="text-xs text-muted-foreground">
+                                            ({formatFileSize(attachment.size)})
+                                        </span>
+                                    </a>
+                                    {attachment.summary && (
+                                        <p className="text-xs text-muted-foreground ml-6">
+                                            {attachment.summary}
+                                        </p>
+                                    )}
+                                </div>
                             ))}
                         </div>
                     )}
