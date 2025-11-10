@@ -5,7 +5,7 @@
 Aether Advisor is your **AI-powered financial strategist**.  
 It helps clients clarify goals, analyze scenarios, and plan wealth-building steps with compliant, easy-to-action guidance.
 
-[Watch Demo](https://www.tella.tv/video/shreyass-video-6tsl)
+
 
 ## 🚀 Features
 
@@ -122,8 +122,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 📞 Contact
-
-[Portfolio](https://heyshreyas.in) | [Email](mailto:shreyassihasane@gmail.com)
-
-Project Link: [https://aether-ai-chatbot.vercel.app](https://aether-ai-chatbot.vercel.app)
