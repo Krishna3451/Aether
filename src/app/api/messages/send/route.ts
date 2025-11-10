@@ -116,16 +116,20 @@ const describeImage = async (buffer: Buffer, mimeType: string): Promise<string |
 type UploadedAttachment = {
     attachment: Attachment;
     extractedText?: string;
+    fullExtractedText?: string;
 };
 
-const cleanAndTruncateText = (text: string, maxChars: number) => {
-    const cleaned = text
+const normalizeExtractedText = (text: string) =>
+    text
         .replace(/\r/g, "")
         .replace(/\t/g, " ")
         .replace(/\u0000/g, "")
         .replace(/[ ]{2,}/g, " ")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
+
+const cleanAndTruncateText = (text: string, maxChars: number) => {
+    const cleaned = normalizeExtractedText(text);
 
     if (cleaned.length <= maxChars) {
         return cleaned;
@@ -152,6 +156,7 @@ const uploadAttachments = async (
             const buffer = Buffer.from(await file.arrayBuffer());
 
             let extractedText: string | undefined;
+            let fullExtractedText: string | undefined;
             let attachmentSummary: string | undefined;
             const isPdf =
                 file.type === "application/pdf" ||
@@ -164,7 +169,14 @@ const uploadAttachments = async (
                 try {
                     const result = await parsePdf(buffer);
                     if (result.text?.trim()) {
+                        fullExtractedText = normalizeExtractedText(result.text);
                         extractedText = cleanAndTruncateText(result.text, MAX_ATTACHMENT_CONTEXT_CHARS);
+                        attachmentSummary = extractedText;
+                        console.log("PDF extracted text", {
+                            fileName: file.name,
+                            attachmentId: objectPath,
+                            text: fullExtractedText,
+                        });
                     }
                 } catch (error) {
                     console.error(`Failed to parse PDF ${file.name}:`, error);
@@ -173,6 +185,12 @@ const uploadAttachments = async (
                 attachmentSummary = await describeImage(buffer, file.type || `image/${extension}`);
                 if (attachmentSummary) {
                     extractedText = attachmentSummary;
+                    fullExtractedText = attachmentSummary;
+                    console.log("Image description extracted", {
+                        fileName: file.name,
+                        attachmentId: objectPath,
+                        text: fullExtractedText,
+                    });
                 }
             }
 
@@ -212,8 +230,10 @@ const uploadAttachments = async (
                     storagePath: objectPath,
                     url,
                     summary: attachmentSummary,
+                    extractedText,
                 },
                 extractedText,
+                fullExtractedText,
             };
         })
     );
@@ -284,6 +304,27 @@ export async function POST(request: NextRequest) {
 
         if (messageError || !insertedMessage) {
             return NextResponse.json({ error: messageError?.message ?? "Failed to save message" }, { status: 500 });
+        }
+
+        const attachmentTextPayload = uploadedAttachments
+            .filter((item) => item.fullExtractedText)
+            .map((item) => ({
+                attachment_id: item.attachment.id,
+                chat_id: resolvedChatId,
+                message_id: insertedMessage.id,
+                user_id: user.id,
+                storage_path: item.attachment.storagePath,
+                extracted_text: item.fullExtractedText,
+            }));
+
+        if (attachmentTextPayload.length) {
+            const { error: attachmentTextError } = await supabase
+                .from("attachment_texts")
+                .insert(attachmentTextPayload);
+
+            if (attachmentTextError) {
+                return NextResponse.json({ error: attachmentTextError.message ?? "Failed to save attachment text" }, { status: 500 });
+            }
         }
 
         await supabase

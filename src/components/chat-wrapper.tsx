@@ -22,13 +22,19 @@ const ChatWrapper = ({ user, messages, oMessages, isLoading, isAiLoading, onSubm
 
     const [error, setError] = useState<string | null>(null);
 
-    const filteredOptimistic = oMessages.filter(
-        optMsg => !messages.some(msg => 
-            msg.content === optMsg.content && 
+    const filteredOptimistic = oMessages.filter(optMsg => {
+        const hasMatchingId = optMsg.id && messages.some(msg => msg.id === optMsg.id);
+
+        if (hasMatchingId) {
+            return false;
+        }
+
+        return !messages.some(msg =>
+            msg.content === optMsg.content &&
             msg.role === optMsg.role &&
             Math.abs(new Date(msg.created_at).getTime() - new Date(optMsg.created_at).getTime()) < 1000
-        )
-    );
+        );
+    });
 
     const allMessages = [...messages, ...filteredOptimistic];
     // const [isLoading, setIsLoading] = useState<boolean>(false);

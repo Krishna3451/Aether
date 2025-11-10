@@ -16,6 +16,7 @@ export type Attachment = {
     url: string;
     storagePath: string;
     summary?: string;
+    extractedText?: string;
 };
 
 export type Message = {
